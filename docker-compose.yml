@@ -47,7 +47,7 @@ services:
     networks:
       - gts-network
 
-  gts-ai-summary:
+  gts-ai-summary-service:
     build:
       context: ../gts-ai-summary-service
       dockerfile: Dockerfile
@@ -64,9 +64,9 @@ services:
       - gts-network
     restart: on-failure
 
-  devfeed:
+  gts-collector-service:
     build:
-      context: ../devfeed
+      context: ../gts-collector-service
       dockerfile: Dockerfile
     container_name: gts-collector-service
     ports:
