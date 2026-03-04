@@ -57,3 +57,10 @@ resource "aws_instance" "gts" {
 
   tags = { Name = "gts-ec2" }
 }
+
+resource "aws_eip" "gts" {
+  instance = aws_instance.gts.id
+  domain   = "vpc"
+
+  tags = { Name = "gts-eip" }
+}

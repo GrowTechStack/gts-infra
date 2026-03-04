@@ -71,6 +71,29 @@ services:
     restart: on-failure
 COMPOSEEOF
 
+# Write deploy script (GitHub Actions에서 호출)
+cat > /app/deploy.sh << 'DEPLOYEOF'
+#!/bin/bash
+set -e
+
+SERVICE=$1  # collector 또는 ai-summary
+
+aws ecr get-login-password --region ap-northeast-2 | \
+  docker login --username AWS --password-stdin $(aws sts get-caller-identity --query Account --output text).dkr.ecr.ap-northeast-2.amazonaws.com
+
+if [ "$SERVICE" = "collector" ]; then
+  docker compose -f /app/docker-compose.prod.yml pull gts-collector-service
+  docker compose -f /app/docker-compose.prod.yml up -d gts-collector-service
+elif [ "$SERVICE" = "ai-summary" ]; then
+  docker compose -f /app/docker-compose.prod.yml pull gts-ai-summary-service
+  docker compose -f /app/docker-compose.prod.yml up -d gts-ai-summary-service
+else
+  docker compose -f /app/docker-compose.prod.yml pull
+  docker compose -f /app/docker-compose.prod.yml up -d
+fi
+DEPLOYEOF
+chmod +x /app/deploy.sh
+
 # 이미지가 ECR에 없으면 실패 → 이미지 푸시 후 수동으로 docker compose up -d 실행
 docker compose -f /app/docker-compose.prod.yml pull && \
   docker compose -f /app/docker-compose.prod.yml up -d || \
