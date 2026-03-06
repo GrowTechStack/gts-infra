@@ -9,3 +9,15 @@ resource "aws_ecr_repository" "ai_summary" {
   image_tag_mutability = "MUTABLE"
   tags                 = { Name = "gts-ai-summary-service" }
 }
+
+resource "aws_ecr_repository" "eureka" {
+  name                 = "gts-eureka-server"
+  image_tag_mutability = "MUTABLE"
+  tags                 = { Name = "gts-eureka-server" }
+}
+
+resource "aws_ecr_repository" "gateway" {
+  name                 = "gts-gateway"
+  image_tag_mutability = "MUTABLE"
+  tags                 = { Name = "gts-gateway" }
+}

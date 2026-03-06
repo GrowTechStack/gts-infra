@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Setup swap (1GB) - t2.micro RAM 부족 방지
+# Setup swap (1GB) - t3.micro RAM 부족 방지
 fallocate -l 1G /swapfile
 chmod 600 /swapfile
 mkswap /swapfile
@@ -10,7 +10,7 @@ echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
 # Install Docker
 dnf update -y
-dnf install -y docker cronie
+dnf install -y docker cronie nginx
 systemctl start docker
 systemctl enable docker
 usermod -a -G docker ec2-user
@@ -25,7 +25,7 @@ chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 aws ecr get-login-password --region ${aws_region} | \
   docker login --username AWS --password-stdin ${account_id}.dkr.ecr.${aws_region}.amazonaws.com
 
-# ECR 토큰 자동 갱신 (12시간마다 만료되므로 6시간마다 갱신)
+# ECR 토큰 자동 갱신 (6시간마다)
 systemctl enable crond
 systemctl start crond
 mkdir -p /etc/cron.d
@@ -39,9 +39,34 @@ mkdir -p /app
 # Write docker-compose.prod.yml
 cat > /app/docker-compose.prod.yml << 'COMPOSEEOF'
 services:
+  gts-eureka-server:
+    image: ${account_id}.dkr.ecr.${aws_region}.amazonaws.com/gts-eureka-server:latest
+    container_name: gts-eureka-server
+    ports:
+      - "8761:8761"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    restart: on-failure
+    networks:
+      - gts-network
+
+  gts-gateway:
+    image: ${account_id}.dkr.ecr.${aws_region}.amazonaws.com/gts-gateway:latest
+    container_name: gts-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_URL: http://gts-eureka-server:8761/eureka/
+    depends_on:
+      - gts-eureka-server
+    restart: on-failure
+    networks:
+      - gts-network
+
   gts-ai-summary-service:
     image: ${account_id}.dkr.ecr.${aws_region}.amazonaws.com/gts-ai-summary-service:latest
-    container_name: gts-ai-summary
+    container_name: gts-ai-summary-service
     ports:
       - "29998:29998"
     environment:
@@ -51,7 +76,12 @@ services:
       SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL: SASL_SSL
       SPRING_KAFKA_PROPERTIES_SASL_MECHANISM: PLAIN
       SPRING_KAFKA_PROPERTIES_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"${kafka_api_key}\" password=\"${kafka_api_secret}\";"
+      EUREKA_URL: http://gts-eureka-server:8761/eureka/
+    depends_on:
+      - gts-eureka-server
     restart: on-failure
+    networks:
+      - gts-network
 
   gts-collector-service:
     image: ${account_id}.dkr.ecr.${aws_region}.amazonaws.com/gts-collector-service:latest
@@ -68,29 +98,93 @@ services:
       SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL: SASL_SSL
       SPRING_KAFKA_PROPERTIES_SASL_MECHANISM: PLAIN
       SPRING_KAFKA_PROPERTIES_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"${kafka_api_key}\" password=\"${kafka_api_secret}\";"
+      EUREKA_URL: http://gts-eureka-server:8761/eureka/
+    depends_on:
+      - gts-eureka-server
     restart: on-failure
+    networks:
+      - gts-network
+
+networks:
+  gts-network:
+    driver: bridge
 COMPOSEEOF
+
+# Write Nginx config
+mkdir -p /etc/nginx/conf.d
+cat > /etc/nginx/conf.d/growtechstack.conf << 'NGINXEOF'
+server {
+    listen 80;
+    server_name growtechstack.com www.growtechstack.com;
+    return 301 https://$$host$$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name growtechstack.com www.growtechstack.com;
+
+    ssl_certificate     /etc/letsencrypt/live/growtechstack.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/growtechstack.com/privkey.pem;
+
+    # API → Gateway
+    location /api/ {
+        proxy_pass         http://localhost:8080/api/;
+        proxy_set_header   Host $$host;
+        proxy_set_header   X-Real-IP $$remote_addr;
+        proxy_set_header   X-Forwarded-For $$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $$scheme;
+    }
+
+    # Swagger (collector → gateway 경유)
+    location /swagger-ui/ {
+        proxy_pass         http://localhost:29999/swagger-ui/;
+        proxy_set_header   Host $$host;
+        proxy_set_header   X-Real-IP $$remote_addr;
+    }
+    location /v3/api-docs {
+        proxy_pass         http://localhost:29999/v3/api-docs;
+        proxy_set_header   Host $$host;
+    }
+}
+NGINXEOF
+
+systemctl enable nginx
+systemctl start nginx
 
 # Write deploy script (GitHub Actions에서 호출)
 cat > /app/deploy.sh << 'DEPLOYEOF'
 #!/bin/bash
 set -e
 
-SERVICE=$1  # collector 또는 ai-summary
+SERVICE=$1
+REGION=ap-northeast-2
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ECR_REGISTRY="$${ACCOUNT_ID}.dkr.ecr.$${REGION}.amazonaws.com"
 
-aws ecr get-login-password --region ap-northeast-2 | \
-  docker login --username AWS --password-stdin $(aws sts get-caller-identity --query Account --output text).dkr.ecr.ap-northeast-2.amazonaws.com
+aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
-if [ "$SERVICE" = "collector" ]; then
-  docker compose -f /app/docker-compose.prod.yml pull gts-collector-service
-  docker compose -f /app/docker-compose.prod.yml up -d gts-collector-service
-elif [ "$SERVICE" = "ai-summary" ]; then
-  docker compose -f /app/docker-compose.prod.yml pull gts-ai-summary-service
-  docker compose -f /app/docker-compose.prod.yml up -d gts-ai-summary-service
-else
-  docker compose -f /app/docker-compose.prod.yml pull
-  docker compose -f /app/docker-compose.prod.yml up -d
-fi
+case "$SERVICE" in
+  collector)
+    docker compose -f /app/docker-compose.prod.yml pull gts-collector-service
+    docker compose -f /app/docker-compose.prod.yml up -d gts-collector-service
+    ;;
+  ai-summary)
+    docker compose -f /app/docker-compose.prod.yml pull gts-ai-summary-service
+    docker compose -f /app/docker-compose.prod.yml up -d gts-ai-summary-service
+    ;;
+  gateway)
+    docker compose -f /app/docker-compose.prod.yml pull gts-gateway
+    docker compose -f /app/docker-compose.prod.yml up -d gts-gateway
+    ;;
+  eureka)
+    docker compose -f /app/docker-compose.prod.yml pull gts-eureka-server
+    docker compose -f /app/docker-compose.prod.yml up -d gts-eureka-server
+    ;;
+  *)
+    docker compose -f /app/docker-compose.prod.yml pull
+    docker compose -f /app/docker-compose.prod.yml up -d
+    ;;
+esac
 DEPLOYEOF
 chmod +x /app/deploy.sh
 

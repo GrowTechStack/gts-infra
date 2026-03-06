@@ -43,6 +43,7 @@ prompt.txt
 
 ## env
 .env
+ec2/docker-compose.prod.yml
 
 ## Terraform
 terraform/.terraform/
