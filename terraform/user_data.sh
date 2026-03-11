@@ -8,9 +8,9 @@ mkswap /swapfile
 swapon /swapfile
 echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
-# Install Docker
+# Install Docker and Utilities
 dnf update -y
-dnf install -y docker cronie nginx nano
+dnf install -y docker cronie nginx nano mariadb105 htop jq git net-tools bind-utils
 systemctl start docker
 systemctl enable docker
 usermod -a -G docker ec2-user
