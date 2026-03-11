@@ -24,8 +24,12 @@ case "$SERVICE" in
     docker compose -f /app/docker-compose.prod.yml pull gts-eureka-server
     docker compose -f /app/docker-compose.prod.yml up -d gts-eureka-server
     ;;
+  auth)
+    docker compose -f /app/docker-compose.prod.yml pull gts-auth-service
+    docker compose -f /app/docker-compose.prod.yml up -d gts-auth-service
+    ;;
   *)
-    echo "Usage: deploy.sh [collector|ai-summary|gateway|eureka]"
+    echo "Usage: deploy.sh [collector|ai-summary|gateway|eureka|auth]"
     exit 1
     ;;
 esac

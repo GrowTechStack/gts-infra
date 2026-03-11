@@ -21,3 +21,9 @@ resource "aws_ecr_repository" "gateway" {
   image_tag_mutability = "MUTABLE"
   tags                 = { Name = "gts-gateway" }
 }
+
+resource "aws_ecr_repository" "auth" {
+  name                 = "gts-auth-service"
+  image_tag_mutability = "MUTABLE"
+  tags                 = { Name = "gts-auth-service" }
+}

@@ -53,7 +53,13 @@ resource "aws_instance" "gts" {
     kafka_api_secret        = var.kafka_api_secret
     db_host                 = aws_db_instance.gts.address
     db_password             = var.db_password
+    jwt_secret              = var.jwt_secret
   })
+
+  root_block_device {
+    volume_size = 20
+    volume_type = "gp3"
+  }
 
   tags = { Name = "gts-ec2" }
 }

@@ -37,3 +37,9 @@ variable "kafka_api_secret" {
   type        = string
   sensitive   = true
 }
+
+variable "jwt_secret" {
+  description = "JWT signing secret (32+ chars, shared between gateway and auth-service)"
+  type        = string
+  sensitive   = true
+}
